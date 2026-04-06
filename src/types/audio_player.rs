@@ -12,7 +12,8 @@ use std::{
     error::Error,
     fs,
     path::{Path, PathBuf},
-    time::Duration,
+    sync::{Arc, Mutex as StdMutex},
+    time::{Duration, Instant},
 };
 
 #[derive(Debug, Eq, PartialEq, Default, Clone, Serialize, Deserialize)]
@@ -63,12 +64,46 @@ pub struct AudioPlayer {
     pub volume: f32, // Master volume
 }
 
+fn open_default_sink_throttled() -> Result<MixerDeviceSink, Box<dyn Error>> {
+    let last_log_time: Arc<StdMutex<Option<Instant>>> = Arc::new(StdMutex::new(None));
+    let suppressed_count: Arc<StdMutex<u64>> = Arc::new(StdMutex::new(0));
+
+    let error_callback = move |err: rodio::cpal::StreamError| {
+        let now = Instant::now();
+        let mut last = last_log_time.lock().unwrap();
+        let mut count = suppressed_count.lock().unwrap();
+
+        let should_log = match *last {
+            None => true,
+            Some(t) => now.duration_since(t).as_secs() >= 30,
+        };
+
+        if should_log {
+            if *count > 0 {
+                eprintln!("audio stream error ({} suppressed): {err}", *count);
+            } else {
+                eprintln!("audio stream error: {err}");
+            }
+            *last = Some(now);
+            *count = 0;
+        } else {
+            *count += 1;
+        }
+    };
+
+    let stream_handle = DeviceSinkBuilder::from_default_device()?
+        .with_error_callback(error_callback)
+        .open_sink_or_fallback()?;
+
+    Ok(stream_handle)
+}
+
 impl AudioPlayer {
     pub async fn new() -> Result<Self, Box<dyn Error>> {
         let daemon_config = get_daemon_config();
         let default_volume = daemon_config.default_volume.unwrap_or(1.0);
 
-        let stream_handle = DeviceSinkBuilder::open_default_sink()?;
+        let stream_handle = open_default_sink_throttled()?;
 
         let mut audio_player = AudioPlayer {
             stream_handle,
