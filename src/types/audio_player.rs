@@ -106,7 +106,7 @@ impl AudioPlayer {
 
     fn abort_link_thread(&mut self) {
         if let Some(sender) = &self.input_link_sender {
-            if let Ok(_) = sender.send(Terminate {}) {
+            if sender.send(Terminate {}).is_ok() {
                 println!("Sent terminate signal to input link thread");
                 self.input_link_sender = None;
             } else {
@@ -117,7 +117,7 @@ impl AudioPlayer {
 
     fn abort_player_link_thread(&mut self) {
         if let Some(sender) = &self.player_link_sender {
-            if let Ok(_) = sender.send(Terminate {}) {
+            if sender.send(Terminate {}).is_ok() {
                 println!("Sent terminate signal to player link thread");
                 self.player_link_sender = None;
             } else {
