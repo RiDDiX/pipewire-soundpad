@@ -4,7 +4,7 @@
 %global cargo_install_lib 0
 
 Name:            pwsp
-Version:         1.7.1
+Version:         1.7.5
 Release:         %autorelease
 Summary:         Lets you play audio files through your microphone
 
@@ -18,6 +18,7 @@ BuildRequires: cargo
 BuildRequires: pipewire-devel
 BuildRequires: alsa-lib-devel
 BuildRequires: clang-devel
+BuildRequires: cmake
 
 %global _description %{expand:
 PWSP lets you play audio files through your microphone. Has both CLI and

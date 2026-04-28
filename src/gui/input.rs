@@ -8,8 +8,14 @@ use std::path::PathBuf;
 /// Convert an egui Key + Modifiers to a normalized chord string like "Ctrl+Shift+A".
 fn chord_from_event(modifiers: &Modifiers, key: &Key) -> Option<String> {
     let key_name = key.name();
-    let is_valid = (key_name.len() == 1 && key_name.chars().next().unwrap().is_ascii_alphanumeric())
-        || (key_name.starts_with('F') && key_name.len() > 1 && key_name[1..].chars().all(|c| c.is_ascii_digit()));
+    let is_valid = (key_name.len() == 1
+        && key_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric()))
+        || (key_name.starts_with('F')
+            && key_name.len() > 1
+            && key_name[1..].chars().all(|c| c.is_ascii_digit()));
     if !is_valid {
         return None;
     }
@@ -56,8 +62,14 @@ pub fn parse_chord(chord: &str) -> Option<(Modifiers, Key)> {
     }
 
     let key_name = parts[parts.len() - 1];
-    let is_valid = (key_name.len() == 1 && key_name.chars().next().unwrap().is_ascii_alphanumeric())
-        || (key_name.starts_with('F') && key_name.len() > 1 && key_name[1..].chars().all(|c| c.is_ascii_digit()));
+    let is_valid = (key_name.len() == 1
+        && key_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric()))
+        || (key_name.starts_with('F')
+            && key_name.len() > 1
+            && key_name[1..].chars().all(|c| c.is_ascii_digit()));
 
     if !is_valid {
         return None;
@@ -186,18 +198,18 @@ impl SoundpadGui {
             }
 
             // Play selected file on Enter
-            if self.key_pressed(ctx, Key::Enter) {
-                if let Some(path) = self.app_state.selected_file.clone() {
-                    if modifiers.ctrl {
-                        self.play_file(&path, true);
-                    } else if modifiers.shift
-                        && let Some(last_track) = self.audio_player_state.tracks.last()
-                    {
-                        self.stop(Some(last_track.id));
-                        self.play_file(&path, true);
-                    } else {
-                        self.play_file(&path, false);
-                    }
+            if self.key_pressed(ctx, Key::Enter)
+                && let Some(path) = self.app_state.selected_file.clone()
+            {
+                if modifiers.ctrl {
+                    self.play_file(&path, true);
+                } else if modifiers.shift
+                    && let Some(last_track) = self.audio_player_state.tracks.last()
+                {
+                    self.stop(Some(last_track.id));
+                    self.play_file(&path, true);
+                } else {
+                    self.play_file(&path, false);
                 }
             }
 
@@ -206,7 +218,7 @@ impl SoundpadGui {
             let arrow_down_pressed = self.key_pressed(ctx, Key::ArrowDown);
             if modifiers.ctrl && (arrow_up_pressed || arrow_down_pressed) {
                 if modifiers.shift && !self.app_state.dirs.is_empty() {
-                    let mut dirs: Vec<PathBuf> = self.app_state.dirs.iter().cloned().collect();
+                    let mut dirs: Vec<PathBuf> = self.app_state.dirs.to_vec();
                     dirs.sort();
 
                     let current_dir_index = self

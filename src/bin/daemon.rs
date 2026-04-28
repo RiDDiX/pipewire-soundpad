@@ -1,5 +1,5 @@
 use pwsp::{
-    types::socket::{Request, Response, MAX_MESSAGE_SIZE},
+    types::socket::{MAX_MESSAGE_SIZE, Request, Response},
     utils::{
         commands::parse_command,
         daemon::{
@@ -42,10 +42,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     lock_file.lock()?;
 
     let socket_path = runtime_dir.join("daemon.sock");
-    if let Err(e) = fs::remove_file(&socket_path) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(e.into());
-        }
+    if let Err(e) = fs::remove_file(&socket_path)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(e.into());
     }
 
     let listener = UnixListener::bind(&socket_path)?;

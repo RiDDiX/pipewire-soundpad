@@ -1,8 +1,9 @@
 use crate::types::{
     audio_player::AudioPlayer,
     config::DaemonConfig,
-    socket::{Request, Response, MAX_MESSAGE_SIZE},
+    socket::{MAX_MESSAGE_SIZE, Request, Response},
 };
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::{error::Error, fs};
@@ -34,7 +35,6 @@ pub fn get_daemon_config() -> DaemonConfig {
         config
     })
 }
-
 
 pub fn get_runtime_dir() -> PathBuf {
     dirs::runtime_dir().unwrap_or(PathBuf::from("/run/pwsp"))

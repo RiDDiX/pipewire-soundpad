@@ -254,12 +254,12 @@ impl AudioPlayer {
     pub fn get_volume(&mut self, id: Option<u32>) -> Option<f32> {
         if let Some(id) = id {
             if let Some(sound) = self.tracks.get_mut(&id) {
-                return Some(sound.sink.volume());
+                Some(sound.sink.volume())
             } else {
-                return None;
+                None
             }
         } else {
-            return Some(self.volume);
+            Some(self.volume)
         }
     }
 
@@ -443,10 +443,10 @@ impl AudioPlayer {
             if let Some(sound) = self.tracks.get(&id) {
                 let path = sound.path.clone();
                 let handle = tokio::task::spawn_blocking(move || {
-                    if let Ok(file) = fs::File::open(&path) {
-                        if let Ok(source) = Decoder::try_from(file) {
-                            return Some((id, source));
-                        }
+                    if let Ok(file) = fs::File::open(&path)
+                        && let Ok(source) = Decoder::try_from(file)
+                    {
+                        return Some((id, source));
                     }
                     None
                 });
@@ -455,13 +455,12 @@ impl AudioPlayer {
         }
 
         for handle in restart_futures {
-            if let Ok(res) = handle.await {
-                if let Some((id, source)) = res {
-                    if let Some(sound) = self.tracks.get_mut(&id) {
-                        sound.sink.append(source);
-                        sound.sink.play();
-                    }
-                }
+            if let Ok(res) = handle.await
+                && let Some((id, source)) = res
+                && let Some(sound) = self.tracks.get_mut(&id)
+            {
+                sound.sink.append(source);
+                sound.sink.play();
             }
         }
 

@@ -1,9 +1,10 @@
 use crate::gui::SoundpadGui;
 use egui::{
-    Align, AtomExt, Button, CollapsingHeader, Color32, ComboBox, CursorIcon, FontFamily, Grid,
-    Label, Layout, RichText, ScrollArea, Sense, Slider, TextEdit, Ui, Vec2,
+    Align, AtomExt, Button, CollapsingHeader, Color32, ComboBox, CursorIcon, FontFamily, Label,
+    Layout, RichText, ScrollArea, Sense, Slider, TextEdit, Ui, Vec2,
 };
 use egui_dnd::dnd;
+use egui_extras::{Column, TableBuilder};
 use egui_material_icons::icons::*;
 use pwsp::types::socket::Request;
 use pwsp::types::{audio_player::TrackInfo, gui::AppState};
@@ -133,156 +134,191 @@ impl SoundpadGui {
     }
 
     pub fn draw_hotkeys(&mut self, ui: &mut Ui) {
-        let area_size = ui.available_size();
         ui.vertical(|ui| {
-            ui.set_min_width(area_size.x);
-            ui.set_min_height(area_size.y);
             ui.spacing_mut().item_spacing.y = 5.0;
 
-            // Header
-            ui.horizontal_top(|ui| {
-                let back_button = Button::new(ICON_ARROW_BACK).frame(false);
-                if ui.add(back_button).clicked() {
-                    self.app_state.show_hotkeys = false;
-                }
-
-                ui.add_space(ui.available_width() / 2.0 - 40.0);
-                ui.label(RichText::new("Hotkeys").color(Color32::WHITE).monospace());
-            });
-
+            self.draw_hotkeys_header(ui);
             ui.separator();
 
-            // Search and Add Command
-            ui.horizontal(|ui| {
-                ui.menu_button(format!("{} Add Command", ICON_ADD.codepoint), |ui| {
-                    let mut selected_cmd = None;
-                    if ui.button("Toggle Pause").clicked() {
-                        selected_cmd = Some(("cmd_toggle_pause", Request::toggle_pause(None)));
-                    }
-                    if ui.button("Stop Playback").clicked() {
-                        selected_cmd = Some(("cmd_stop", Request::stop(None)));
-                    }
-                    if ui.button("Pause Playback").clicked() {
-                        selected_cmd = Some(("cmd_pause", Request::pause(None)));
-                    }
-                    if ui.button("Resume Playback").clicked() {
-                        selected_cmd = Some(("cmd_resume", Request::resume(None)));
-                    }
-                    if ui.button("Toggle Loop").clicked() {
-                        selected_cmd = Some(("cmd_toggle_loop", Request::toggle_loop(None)));
-                    }
-
-                    if let Some((slot_name, req)) = selected_cmd {
-                        make_request_async(Request::set_hotkey_action(slot_name, &req));
-                        self.app_state
-                            .hotkey_config
-                            .set_slot(slot_name.to_string(), req);
-                        self.app_state.assigning_hotkey_slot = Some(slot_name.to_string());
-                        self.app_state.hotkey_capture_active = true;
-                        ui.close();
-                    }
-                });
-
-                ui.add_space(10.0);
-
-                ui.add_sized(
-                    [ui.available_width(), 22.0],
-                    TextEdit::singleline(&mut self.app_state.hotkey_search_query)
-                        .hint_text("Search hotkeys..."),
-                );
-            });
-
+            self.draw_hotkeys_search(ui);
             ui.separator();
             ui.add_space(5.0);
 
-            let conflicts = self.app_state.hotkey_config.find_conflicts();
-            let conflict_slots: std::collections::HashSet<String> = conflicts
-                .iter()
-                .flat_map(|(a, b)| vec![a.clone(), b.clone()])
-                .collect();
+            let action = self.draw_hotkeys_table(ui);
 
-            let search = self.app_state.hotkey_search_query.to_lowercase();
+            if let Some(action) = action {
+                self.handle_hotkey_action(action);
+            }
+        });
+    }
 
-            // Slots table
-            let mut action: Option<HotkeyAction> = None;
-            let area_size = ui.available_size();
+    fn draw_hotkeys_header(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            let back_button = Button::new(ICON_ARROW_BACK).frame(false);
+            if ui.add(back_button).clicked() {
+                self.app_state.show_hotkeys = false;
+            }
 
-            ScrollArea::vertical().show(ui, |ui| {
-                ui.set_min_width(area_size.x);
-                Grid::new("hotkeys_grid")
-                    .striped(true)
-                    .num_columns(4)
-                    .max_col_width(area_size.x)
-                    .min_col_width(area_size.x / 4.0)
-                    .spacing([40.0, 10.0])
-                    .show(ui, |ui| {
-                        // Table header
-                        ui.label(
-                            RichText::new("Slot")
-                                .strong()
-                                .monospace()
-                                .color(Color32::LIGHT_GRAY),
-                        );
-                        ui.label(
-                            RichText::new("Sound")
-                                .strong()
-                                .monospace()
-                                .color(Color32::LIGHT_GRAY),
-                        );
-                        ui.label(
-                            RichText::new("Key Chord")
-                                .strong()
-                                .monospace()
-                                .color(Color32::LIGHT_GRAY),
-                        );
-                        ui.label(
-                            RichText::new("Actions")
-                                .strong()
-                                .monospace()
-                                .color(Color32::LIGHT_GRAY),
-                        );
-                        ui.end_row();
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new("Hotkeys").color(Color32::WHITE).monospace());
+            });
+        });
+    }
 
-                        let slots: Vec<_> = self
-                            .app_state
-                            .hotkey_config
-                            .slots
-                            .iter()
-                            .filter(|s| {
-                                if search.is_empty() {
-                                    return true;
-                                }
-                                s.slot.to_lowercase().contains(&search)
-                                    || format!("{:?}", s.action).to_lowercase().contains(&search)
-                                    || s.key_chord
-                                        .as_deref()
-                                        .unwrap_or("")
-                                        .to_lowercase()
-                                        .contains(&search)
-                            })
-                            .cloned()
-                            .collect();
+    fn draw_hotkeys_search(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.menu_button(format!("{} Add Command", ICON_ADD.codepoint), |ui| {
+                let mut selected_cmd = None;
+                if ui.button("Toggle Pause").clicked() {
+                    selected_cmd = Some(("cmd_toggle_pause", Request::toggle_pause(None)));
+                }
+                if ui.button("Stop Playback").clicked() {
+                    selected_cmd = Some(("cmd_stop", Request::stop(None)));
+                }
+                if ui.button("Pause Playback").clicked() {
+                    selected_cmd = Some(("cmd_pause", Request::pause(None)));
+                }
+                if ui.button("Resume Playback").clicked() {
+                    selected_cmd = Some(("cmd_resume", Request::resume(None)));
+                }
+                if ui.button("Toggle Loop").clicked() {
+                    selected_cmd = Some(("cmd_toggle_loop", Request::toggle_loop(None)));
+                }
 
-                        for slot in &slots {
+                if let Some((slot_name, req)) = selected_cmd {
+                    make_request_async(Request::set_hotkey_action(slot_name, &req));
+                    self.app_state
+                        .hotkey_config
+                        .set_slot(slot_name.to_string(), req);
+                    self.app_state.assigning_hotkey_slot = Some(slot_name.to_string());
+                    self.app_state.hotkey_capture_active = true;
+                    ui.close();
+                }
+            });
+
+            ui.add_space(10.0);
+
+            ui.add(
+                TextEdit::singleline(&mut self.app_state.hotkey_search_query)
+                    .hint_text("Search hotkeys...")
+                    .desired_width(f32::INFINITY),
+            );
+        });
+    }
+
+    fn draw_hotkeys_table(&mut self, ui: &mut Ui) -> Option<HotkeyAction> {
+        let conflicts = self.app_state.hotkey_config.find_conflicts();
+        let conflict_slots: std::collections::HashSet<&str> =
+            conflicts.into_iter().flat_map(|(a, b)| [a, b]).collect();
+
+        let search = self.app_state.hotkey_search_query.to_lowercase();
+        let mut action: Option<HotkeyAction> = None;
+
+        let slots: Vec<_> = self
+            .app_state
+            .hotkey_config
+            .slots
+            .iter()
+            .filter(|s| {
+                if search.is_empty() {
+                    return true;
+                }
+                s.slot.to_lowercase().contains(&search)
+                    || format!("{:?}", s.action).to_lowercase().contains(&search)
+                    || s.key_chord
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&search)
+            })
+            .cloned()
+            .collect();
+
+        let available_width = ui.available_width();
+        let col_width = (available_width / 4.0).max(80.0);
+
+        TableBuilder::new(ui)
+            .striped(true)
+            .column(Column::exact(col_width).clip(true)) // Slot
+            .column(Column::exact(col_width).clip(true)) // Sound / Action name
+            .column(Column::exact(col_width).clip(true)) // Key Chord
+            .column(Column::exact(col_width).clip(true)) // Actions
+            .header(30.0, |mut header| {
+                header.col(|ui| {
+                    ui.label(
+                        RichText::new("Slot")
+                            .strong()
+                            .monospace()
+                            .color(Color32::LIGHT_GRAY),
+                    );
+                });
+                header.col(|ui| {
+                    ui.label(
+                        RichText::new("Sound")
+                            .strong()
+                            .monospace()
+                            .color(Color32::LIGHT_GRAY),
+                    );
+                });
+                header.col(|ui| {
+                    ui.label(
+                        RichText::new("Key Chord")
+                            .strong()
+                            .monospace()
+                            .color(Color32::LIGHT_GRAY),
+                    );
+                });
+                header.col(|ui| {
+                    ui.label(
+                        RichText::new("Actions")
+                            .strong()
+                            .monospace()
+                            .color(Color32::LIGHT_GRAY),
+                    );
+                });
+            })
+            .body(|mut body| {
+                if slots.is_empty() {
+                    body.row(30.0, |mut row| {
+                        row.col(|_| {});
+                        row.col(|ui| {
+                            ui.label(
+                                RichText::new("No hotkey slots configured.")
+                                    .color(Color32::GRAY),
+                            );
+                        });
+                        row.col(|_| {});
+                        row.col(|_| {});
+                    });
+                    return;
+                }
+
+                for slot in &slots {
+                    body.row(30.0, |mut row| {
+                        // Column 1: Slot
+                        row.col(|ui| {
                             ui.horizontal(|ui| {
-                                // Conflict badge
-                                if conflict_slots.contains(&slot.slot) {
+                                if conflict_slots.contains(slot.slot.as_str()) {
                                     ui.label(
                                         RichText::new(ICON_WARNING.codepoint)
                                             .color(Color32::from_rgb(255, 165, 0)),
                                     )
                                     .on_hover_text("Key chord conflict");
                                 }
-
-                                // Slot name
-                                let slot_text = RichText::new(&slot.slot).monospace();
-                                ui.label(slot_text);
+                                ui.add(
+                                    Label::new(RichText::new(&slot.slot).monospace())
+                                        .truncate(),
+                                );
                             });
+                        });
 
-                            // Action description
+                        // Column 2: Sound / Action name
+                        row.col(|ui| {
                             let action_name = match slot.action.name.as_str() {
                                 "play" => {
-                                    if let Some(file_path_str) = slot.action.args.get("file_path") {
+                                    if let Some(file_path_str) =
+                                        slot.action.args.get("file_path")
+                                    {
                                         Path::new(file_path_str)
                                             .file_name()
                                             .unwrap_or_default()
@@ -299,20 +335,29 @@ impl SoundpadGui {
                                 "toggle_loop" => "Toggle Loop".to_string(),
                                 other => other.to_string(),
                             };
-                            ui.add(Label::new(RichText::new(action_name).monospace()).truncate());
+                            ui.add(
+                                Label::new(RichText::new(action_name).monospace()).truncate(),
+                            );
+                        });
 
-                            // Key chord
+                        // Column 3: Key Chord
+                        row.col(|ui| {
                             let chord_text = slot.key_chord.as_deref().unwrap_or("(none)");
-                            ui.label(RichText::new(chord_text).monospace().color(
-                                if slot.key_chord.is_some() {
-                                    Color32::from_rgb(100, 200, 100)
-                                } else {
-                                    Color32::GRAY
-                                },
-                            ));
+                            ui.add(
+                                Label::new(RichText::new(chord_text).monospace().color(
+                                    if slot.key_chord.is_some() {
+                                        Color32::from_rgb(100, 200, 100)
+                                    } else {
+                                        Color32::GRAY
+                                    },
+                                ))
+                                .truncate(),
+                            );
+                        });
 
+                        // Column 4: Actions
+                        row.col(|ui| {
                             ui.horizontal(|ui| {
-                                // Delete button
                                 if ui
                                     .add(Button::new(ICON_DELETE).frame(false))
                                     .on_hover_text("Remove slot")
@@ -320,8 +365,6 @@ impl SoundpadGui {
                                 {
                                     action = Some(HotkeyAction::Remove(slot.slot.clone()));
                                 }
-
-                                // Set key chord button
                                 if ui
                                     .add(Button::new(ICON_KEYBOARD).frame(false))
                                     .on_hover_text("Set key chord")
@@ -329,8 +372,6 @@ impl SoundpadGui {
                                 {
                                     action = Some(HotkeyAction::Capture(slot.slot.clone()));
                                 }
-
-                                // Clear key chord
                                 if slot.key_chord.is_some()
                                     && ui
                                         .add(Button::new(ICON_BACKSPACE).frame(false))
@@ -339,8 +380,6 @@ impl SoundpadGui {
                                 {
                                     action = Some(HotkeyAction::ClearChord(slot.slot.clone()));
                                 }
-
-                                // Play button
                                 if ui
                                     .add(Button::new(ICON_PLAY_ARROW).frame(false))
                                     .on_hover_text("Play")
@@ -349,39 +388,32 @@ impl SoundpadGui {
                                     action = Some(HotkeyAction::Play(slot.slot.clone()));
                                 }
                             });
-                            ui.end_row();
-                        }
-
-                        if slots.is_empty() {
-                            ui.label("No hotkey slots configured.");
-                            ui.label("");
-                            ui.label("");
-                            ui.label("");
-                            ui.end_row();
-                        }
+                        });
                     });
+                }
             });
 
-            if let Some(action) = action {
-                match action {
-                    HotkeyAction::Remove(slot) => {
-                        make_request_async(Request::clear_hotkey(&slot));
-                        self.app_state.hotkey_config.remove_slot(&slot);
-                    }
-                    HotkeyAction::Capture(slot) => {
-                        self.app_state.assigning_hotkey_slot = Some(slot);
-                        self.app_state.hotkey_capture_active = true;
-                    }
-                    HotkeyAction::ClearChord(slot) => {
-                        make_request_async(Request::clear_hotkey_key(&slot));
-                        self.app_state.hotkey_config.set_key_chord(&slot, None);
-                    }
-                    HotkeyAction::Play(slot) => {
-                        self.play_hotkey_slot(&slot);
-                    }
-                }
+        action
+    }
+
+    fn handle_hotkey_action(&mut self, action: HotkeyAction) {
+        match action {
+            HotkeyAction::Remove(slot) => {
+                make_request_async(Request::clear_hotkey(&slot));
+                self.app_state.hotkey_config.remove_slot(&slot);
             }
-        });
+            HotkeyAction::Capture(slot) => {
+                self.app_state.assigning_hotkey_slot = Some(slot);
+                self.app_state.hotkey_capture_active = true;
+            }
+            HotkeyAction::ClearChord(slot) => {
+                make_request_async(Request::clear_hotkey_key(&slot));
+                self.app_state.hotkey_config.set_key_chord(&slot, None);
+            }
+            HotkeyAction::Play(slot) => {
+                self.play_hotkey_slot(&slot);
+            }
+        }
     }
 
     fn draw_header(&mut self, ui: &mut Ui) {
@@ -391,10 +423,9 @@ impl SoundpadGui {
                 return;
             }
 
-            let tracks = self.audio_player_state.tracks.clone();
             let mut action = None;
 
-            for track in tracks {
+            for track in &self.audio_player_state.tracks {
                 CollapsingHeader::new(
                     RichText::new(
                         track
@@ -427,6 +458,99 @@ impl SoundpadGui {
         });
     }
 
+    fn draw_playback_controls(ui: &mut Ui, track: &TrackInfo) -> Option<TrackAction> {
+        let mut action = None;
+
+        let play_button = Button::new(if track.paused {
+            ICON_PLAY_ARROW
+        } else {
+            ICON_PAUSE
+        })
+        .corner_radius(15.0);
+
+        if ui.add_sized([30.0, 30.0], play_button).clicked() {
+            action = Some(if track.paused {
+                TrackAction::Resume(track.id)
+            } else {
+                TrackAction::Pause(track.id)
+            });
+        }
+
+        let loop_button = Button::new(
+            RichText::new(if track.looped {
+                ICON_REPEAT_ONE
+            } else {
+                ICON_REPEAT
+            })
+            .size(18.0),
+        )
+        .frame(false);
+
+        if ui.add_sized([15.0, 30.0], loop_button).clicked() {
+            action = Some(TrackAction::ToggleLoop(track.id));
+        }
+
+        action
+    }
+
+    fn draw_position_control(
+        ui: &mut Ui,
+        ui_state: &mut pwsp::types::gui::TrackUiState,
+        track: &TrackInfo,
+        default_slider_width: f32,
+    ) {
+        let duration = track.duration.unwrap_or(1.0);
+        let position_slider = Slider::new(&mut ui_state.position_slider_value, 0.0..=duration)
+            .show_value(false)
+            .step_by(0.01);
+
+        let position_slider_width = ui.available_width()
+            - (30.0 * 3.0)
+            - default_slider_width
+            - (ui.spacing().item_spacing.x * 6.0);
+
+        ui.spacing_mut().slider_width = position_slider_width;
+        if ui.add_sized([30.0, 30.0], position_slider).drag_stopped() {
+            ui_state.position_dragged = true;
+        }
+
+        let time_label =
+            Label::new(RichText::new(format_time_pair(track.position, duration)).monospace());
+        ui.add_sized([30.0, 30.0], time_label);
+    }
+
+    fn draw_volume_control(
+        ui: &mut Ui,
+        ui_state: &mut pwsp::types::gui::TrackUiState,
+        track: &TrackInfo,
+        default_slider_width: f32,
+    ) {
+        let volume_icon = Self::get_volume_icon(track.volume);
+        let volume_label = Label::new(RichText::new(volume_icon).size(18.0));
+        ui.add_sized([30.0, 30.0], volume_label)
+            .on_hover_text(format!("Volume: {:.0}%", track.volume * 100.0));
+
+        let volume_slider = Slider::new(&mut ui_state.volume_slider_value, 0.0..=1.0)
+            .show_value(false)
+            .step_by(0.01);
+
+        ui.spacing_mut().slider_width = default_slider_width - 30.0;
+        ui.spacing_mut().item_spacing.x = 0.0;
+
+        if ui.add_sized([30.0, 30.0], volume_slider).drag_stopped() {
+            ui_state.volume_dragged = true;
+        }
+    }
+
+    fn draw_stop_control(ui: &mut Ui, track: &TrackInfo) -> Option<TrackAction> {
+        let stop_button = Button::new(ICON_CLOSE).frame(false);
+        if ui.add_sized([30.0, 30.0], stop_button).clicked() {
+            Some(TrackAction::Stop(track.id))
+        } else {
+            None
+        }
+    }
+
     fn draw_track_control(
         ui: &mut Ui,
         app_state: &mut AppState,
@@ -457,93 +581,17 @@ impl SoundpadGui {
         let mut action = None;
 
         ui.horizontal_top(|ui| {
-            // ---------- Play Button ----------
-            let play_button = Button::new(if track.paused {
-                ICON_PLAY_ARROW
-            } else {
-                ICON_PAUSE
-            })
-            .corner_radius(15.0);
-
-            let play_button_response = ui.add_sized([30.0, 30.0], play_button);
-            if play_button_response.clicked() {
-                if track.paused {
-                    action = Some(TrackAction::Resume(track.id));
-                } else {
-                    action = Some(TrackAction::Pause(track.id));
-                }
+            if let Some(act) = Self::draw_playback_controls(ui, track) {
+                action = Some(act);
             }
-            // --------------------------------
-
-            // ---------- Loop Button ----------
-            let loop_button = Button::new(
-                RichText::new(if track.looped {
-                    ICON_REPEAT_ONE
-                } else {
-                    ICON_REPEAT
-                })
-                .size(18.0),
-            )
-            .frame(false);
-
-            let loop_button_response = ui.add_sized([15.0, 30.0], loop_button);
-            if loop_button_response.clicked() {
-                action = Some(TrackAction::ToggleLoop(track.id));
-            }
-            // --------------------------------
-
-            // ---------- Position Slider ----------
-            let duration = track.duration.unwrap_or(1.0);
-            let position_slider = Slider::new(&mut ui_state.position_slider_value, 0.0..=duration)
-                .show_value(false)
-                .step_by(0.01);
 
             let default_slider_width = ui.spacing().slider_width;
-            let position_slider_width = ui.available_width()
-                - (30.0 * 3.0)
-                - default_slider_width
-                - (ui.spacing().item_spacing.x * 6.0);
-            ui.spacing_mut().slider_width = position_slider_width;
-            let position_slider_response = ui.add_sized([30.0, 30.0], position_slider);
-            if position_slider_response.drag_stopped() {
-                ui_state.position_dragged = true;
+            Self::draw_position_control(ui, ui_state, track, default_slider_width);
+            Self::draw_volume_control(ui, ui_state, track, default_slider_width);
+
+            if let Some(act) = Self::draw_stop_control(ui, track) {
+                action = Some(act);
             }
-            // --------------------------------
-
-            // ---------- Time Label ----------
-            let time_label =
-                Label::new(RichText::new(format_time_pair(track.position, duration)).monospace());
-            ui.add_sized([30.0, 30.0], time_label);
-            // --------------------------------
-
-            // ---------- Volume Icon ----------
-            let volume_icon = Self::get_volume_icon(track.volume);
-            let volume_label = Label::new(RichText::new(volume_icon).size(18.0));
-            ui.add_sized([30.0, 30.0], volume_label)
-                .on_hover_text(format!("Volume: {:.0}%", track.volume * 100.0));
-            // --------------------------------
-
-            // ---------- Volume Slider ----------
-            let volume_slider = Slider::new(&mut ui_state.volume_slider_value, 0.0..=1.0)
-                .show_value(false)
-                .step_by(0.01);
-
-            ui.spacing_mut().slider_width = default_slider_width - 30.0;
-            ui.spacing_mut().item_spacing.x = 0.0;
-
-            let volume_slider_response = ui.add_sized([30.0, 30.0], volume_slider);
-            if volume_slider_response.drag_stopped() {
-                ui_state.volume_dragged = true;
-            }
-            // --------------------------------
-
-            // ---------- Stop Button ---------
-            let stop_button = Button::new(ICON_CLOSE).frame(false);
-            let stop_button_response = ui.add_sized([30.0, 30.0], stop_button);
-            if stop_button_response.clicked() {
-                action = Some(TrackAction::Stop(track.id));
-            }
-            // --------------------------------
         });
 
         action
@@ -609,10 +657,10 @@ impl SoundpadGui {
                             .unwrap_or_else(|| path.to_string_lossy().to_string());
 
                         let mut dir_button_text = RichText::new(name.clone());
-                        if let Some(current_dir) = &self.app_state.current_dir {
-                            if current_dir.eq(&path) {
-                                dir_button_text = dir_button_text.color(Color32::WHITE);
-                            }
+                        if let Some(current_dir) = &self.app_state.current_dir
+                            && current_dir.eq(&path)
+                        {
+                            dir_button_text = dir_button_text.color(Color32::WHITE);
                         }
 
                         let dir_button =
@@ -645,10 +693,9 @@ impl SoundpadGui {
                                     ICON_OPEN_IN_BROWSER.codepoint, "Open in File Manager"
                                 ))
                                 .clicked()
+                                && let Err(e) = opener::open(&path)
                             {
-                                if let Err(e) = opener::open(&path) {
-                                    eprintln!("Failed to open file manager: {}", e);
-                                }
+                                eprintln!("Failed to open file manager: {}", e);
                             }
 
                             ui.separator();
@@ -728,13 +775,13 @@ impl SoundpadGui {
                             }
 
                             let mut file_button_text = RichText::new(&file_name);
-                            if let Some(current_file) = &self.app_state.selected_file {
-                                if current_file.eq(&entry_path) {
-                                    file_button_text = file_button_text.color(Color32::WHITE);
-                                }
+                            if let Some(current_file) = &self.app_state.selected_file
+                                && current_file.eq(&entry_path)
+                            {
+                                file_button_text = file_button_text.color(Color32::WHITE);
                             }
 
-                            let file_button = Button::new(file_button_text).frame(false);
+                            let file_button = Button::new(file_button_text).frame(false).truncate();
                             let file_button_response = ui.add(file_button);
                             if file_button_response.clicked() {
                                 ui.input(|i| {
@@ -792,10 +839,9 @@ impl SoundpadGui {
                                         ICON_OPEN_IN_BROWSER.codepoint, "Show in File Manager"
                                     ))
                                     .clicked()
+                                    && let Err(e) = opener::reveal(&entry_path)
                                 {
-                                    if let Err(e) = opener::reveal(&entry_path) {
-                                        eprintln!("Failed to open file manager: {}", e);
-                                    }
+                                    eprintln!("Failed to open file manager: {}", e);
                                 }
 
                                 ui.separator();
@@ -822,15 +868,14 @@ impl SoundpadGui {
 
     fn get_hotkey_badge(&self, path: &PathBuf) -> Option<String> {
         for slot in &self.app_state.hotkey_config.slots {
-            if slot.action.name == "play" {
-                if let Some(file_path_str) = slot.action.args.get("file_path") {
-                    if Path::new(file_path_str) == path.as_path() {
-                        if let Some(chord) = &slot.key_chord {
-                            return Some(format!("[{}]", chord));
-                        } else {
-                            return Some(format!("[{}]", slot.slot));
-                        }
-                    }
+            if slot.action.name == "play"
+                && let Some(file_path_str) = slot.action.args.get("file_path")
+                && Path::new(file_path_str) == path.as_path()
+            {
+                if let Some(chord) = &slot.key_chord {
+                    return Some(format!("[{}]", chord));
+                } else {
+                    return Some(format!("[{}]", slot.slot));
                 }
             }
         }
